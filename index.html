@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta property="og:title" content="Для тебя">
+<meta property="og:description" content="Открой, это тебе">
+<meta name="theme-color" content="#060104">
+<style>body{margin:0}</style>
+<title>Ты очень красива</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@800&family=Marck+Script&display=swap">
+<style>
+  /* Один экран: чёрная ночь, в центре сердце, собранное из слов; сверху подпись от руки. */
+  :root {
+    color-scheme: dark;
+    --bg: #060104;
+    --heart: #ff2448;
+    --heart-hot: #ffc2cd;
+    --heart-deep: #b80d2e;
+    --glow: rgba(255, 30, 70, 0.55);
+    --muted: #8f5a66;
+    --font-hand: "Marck Script", "Segoe Script", "Snell Roundhand", cursive;
+    --font-word: "Manrope", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--heart);
+    overflow: hidden;
+    position: relative;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  canvas {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: manipulation;
+  }
+  h1 {
+    position: absolute;
+    left: 0; right: 0;
+    top: calc(env(safe-area-inset-top, 0px) + 6vh);
+    margin: 0;
+    padding-inline: 16px;
+    text-align: center;
+    text-wrap: balance;
+    font: 400 clamp(2rem, 9.5vw, 3.6rem)/1.1 var(--font-hand);
+    color: var(--heart);
+    text-shadow: 0 0 14px var(--glow), 0 0 42px var(--glow);
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 1.6s ease, transform 1.6s ease;
+  }
+  p {
+    position: absolute;
+    left: 0; right: 0;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 4vh);
+    margin: 0;
+    text-align: center;
+    font: 800 0.7rem/1 var(--font-word);
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--muted);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 1.6s ease;
+  }
+  .on { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) {
+    h1, p { transition: none; }
+  }
+</style>
+
+<canvas id="scene" aria-label="Сердце, собранное из слов «ты очень красива»"></canvas>
+<h1 id="title">Ты очень красива</h1>
+<p id="hint">коснись сердца</p>
+
+<script>
+(function () {
+  var PHRASE = 'ты очень красива ♥ ты очень милая ♥ ты котёнок ♥ ты чудо ♥ ты солнышко ♥ ';
+  var FLOAT_TEXTS = ['ты очень красива', 'ты очень милая', 'ты котёнок', 'ты чудо', 'ты солнышко', 'ты прелесть', 'у тебя красивая улыбка'];
+  var floatIndex = 0;
+
+  var canvas = document.getElementById('scene');
+  var ctx = canvas.getContext('2d');
+  var title = document.getElementById('title');
+  var hint = document.getElementById('hint');
+  var css = getComputedStyle(document.documentElement);
+  var C = {
+    heart: css.getPropertyValue('--heart').trim(),
+    hot: css.getPropertyValue('--heart-hot').trim(),
+    deep: css.getPropertyValue('--heart-deep').trim(),
+    hand: css.getPropertyValue('--font-hand').trim(),
+    word: css.getPropertyValue('--font-word').trim()
+  };
+  var calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var W = 0, H = 0, dpr = 1, cx = 0, cy = 0, s = 1, fs = 12;
+  var outline = [], chars = [], stars = [], sparks = [], floaters = [];
+  var t = 0, last = 0, nextFloat = 6.2, running = false;
+
+  var MID = 2.5; // сердце по вертикали идёт от -17 до 12, центр около -2.5
+
+  function heartPt(a) {
+    var sn = Math.sin(a);
+    return [
+      16 * sn * sn * sn,
+      13 * Math.cos(a) - 5 * Math.cos(2 * a) - 2 * Math.cos(3 * a) - Math.cos(4 * a)
+    ];
+  }
+  function toScreen(p, k) {
+    return [cx + p[0] * s * k, cy - (p[1] + MID) * s * k];
+  }
+  function inside(px, py, poly) {
+    var hit = false;
+    for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      var a = poly[i], b = poly[j];
+      if ((a[1] > py) !== (b[1] > py) &&
+          px < (b[0] - a[0]) * (py - a[1]) / (b[1] - a[1]) + a[0]) hit = !hit;
+    }
+    return hit;
+  }
+
+  function build() {
+    var r = canvas.getBoundingClientRect();
+    W = r.width || window.innerWidth || 360;
+    H = r.height || window.innerHeight || 640;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    cx = W / 2;
+    cy = H * 0.54;
+    s = Math.max(2, Math.min((W - 36) / 32, H * 0.5 / 29));
+    fs = Math.max(9, s * 32 / 27);
+
+    outline = [];
+    var inner = [];
+    for (var i = 0; i <= 240; i++) {
+      var p = heartPt(i / 240 * Math.PI * 2);
+      outline.push(toScreen(p, 1));
+      inner.push(toScreen(p, 0.93));
+    }
+
+    // Раскладываем фразу строками внутри контура
+    ctx.font = '800 ' + fs + 'px ' + C.word;
+    var lh = fs * 1.24, n = 0, placed = [];
+    var top = cy - (12 + MID) * s, bottom = cy + (17 - MID) * s;
+    var x0 = cx - 16 * s, x1 = cx + 16 * s;
+    for (var y = top + lh * 0.6; y < bottom; y += lh) {
+      var spans = [], start = null;
+      for (var x = x0; x <= x1 + 1; x++) {
+        var isIn = x <= x1 && inside(x, y, inner);
+        if (isIn && start === null) start = x;
+        if (!isIn && start !== null) { spans.push([start, x]); start = null; }
+      }
+      for (var k = 0; k < spans.length; k++) {
+        var a = spans[k][0], b = spans[k][1];
+        if (b - a < fs * 1.3) continue;
+        var row = [], cur = a;
+        while (true) {
+          var ch = PHRASE[n % PHRASE.length];
+          if (ch === ' ' && cur === a) { n++; continue; }
+          var w = ctx.measureText(ch).width;
+          if (cur + w > b) break;
+          if (ch !== ' ') row.push({ ch: ch, x: cur + w / 2 });
+          cur += w; n++;
+        }
+        var shift = (b - cur) / 2;
+        for (var q = 0; q < row.length; q++) placed.push({ ch: row[q].ch, tx: row[q].x + shift, ty: y });
+      }
+    }
+
+    var reach = 16 * s;
+    chars = placed.map(function (c, i) {
+      var d = Math.hypot(c.tx - cx, c.ty - cy);
+      var ang = Math.random() * Math.PI * 2, far = Math.max(W, H) * (0.5 + Math.random() * 0.4);
+      return {
+        ch: c.ch, tx: c.tx, ty: c.ty, d: d,
+        tone: d < reach * 0.32 ? 2 : d < reach * 0.62 ? 1 : 0,
+        x: calm ? c.tx : cx + Math.cos(ang) * far,
+        y: calm ? c.ty : cy + Math.sin(ang) * far,
+        vx: 0, vy: 0,
+        delay: calm ? 0 : 1.5 + i / placed.length * 3 + Math.random() * 0.35
+      };
+    });
+
+    stars = [];
+    for (var j = 0; j < 46; j++) {
+      stars.push({ x: Math.random() * W, y: Math.random() * H, r: Math.random() * 1.1 + 0.3, ph: Math.random() * 6.28 });
+    }
+  }
+
+  function burst(x, y, count, power) {
+    for (var i = 0; i < count; i++) {
+      var a = Math.random() * Math.PI * 2, v = power * (0.25 + Math.random() * 0.75);
+      sparks.push({ x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0, dur: 0.7 + Math.random() * 0.9, r: Math.random() * 1.6 + 0.6 });
+    }
+  }
+
+  function spawnFloater() {
+    ctx.font = '400 ' + Math.round(fs * 1.9) + 'px ' + C.hand;
+    var size = fs * (1.5 + Math.random() * 0.8);
+    var text = FLOAT_TEXTS[floatIndex++ % FLOAT_TEXTS.length];
+    var half = ctx.measureText(text).width / 2 * (size / (fs * 1.9)) + 8;
+    var titleEnd = title.getBoundingClientRect().bottom + 10;
+    for (var tries = 0; tries < 30; tries++) {
+      var x = half + Math.random() * Math.max(1, W - half * 2);
+      var y = titleEnd + Math.random() * Math.max(1, H - titleEnd - 70);
+      var nx = (x - cx) / (16 * s + half * 0.6), ny = (y - cy) / (15.5 * s);
+      if (nx * nx + ny * ny < 1.35) continue; // не поверх сердца
+      floaters.push({ text: text, x: x, y: y, size: size, rot: (Math.random() - 0.5) * 0.3, life: 0, dur: 3 + Math.random() * 1.2 });
+      burst(x, y, 14, 60);
+      return;
+    }
+  }
+
+  function beatAt(time) {
+    if (calm || time < 5) return 0;
+    var ph = (time % 1.15) / 1.15;
+    var a = (ph - 0.1) / 0.05, b = (ph - 0.3) / 0.07;
+    return Math.exp(-a * a) * 0.055 + Math.exp(-b * b) * 0.035;
+  }
+
+  function frame(now) {
+    var dt = Math.min((now - last) / 1000 || 0, 0.033);
+    last = now; t += dt;
+    var beat = beatAt(t), k = 1 + beat;
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+
+    // звёзды
+    ctx.fillStyle = C.hot;
+    for (var i = 0; i < stars.length; i++) {
+      var st = stars[i];
+      ctx.globalAlpha = 0.12 + 0.2 * (0.5 + 0.5 * Math.sin(t * 1.3 + st.ph));
+      ctx.beginPath(); ctx.arc(st.x, st.y, st.r, 0, 6.283); ctx.fill();
+    }
+
+    // свечение за сердцем
+    var lit = calm ? 1 : Math.min(1, Math.max(0, (t - 1.5) / 3.5));
+    var g = ctx.createRadialGradient(cx, cy, 0, cx, cy, 22 * s * k);
+    g.addColorStop(0, 'rgba(255,30,70,' + (0.2 * lit + beat * 2.2).toFixed(3) + ')');
+    g.addColorStop(1, 'rgba(255,30,70,0)');
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    // контур: рисуется от ложбинки вниз по обеим сторонам
+    var prog = calm ? 1 : Math.min(1, t / 2);
+    prog = 1 - Math.pow(1 - prog, 3);
+    var upto = Math.floor(120 * prog);
+    ctx.save();
+    ctx.translate(cx, cy); ctx.scale(k, k); ctx.translate(-cx, -cy);
+    ctx.lineWidth = 1.5; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.strokeStyle = C.heart; ctx.shadowColor = C.heart; ctx.shadowBlur = 16;
+    ctx.globalAlpha = 0.5 + 0.5 * (1 - lit) + beat * 4;
+    ctx.beginPath();
+    for (var a1 = 0; a1 <= upto; a1++) ctx[a1 ? 'lineTo' : 'moveTo'](outline[a1][0], outline[a1][1]);
+    for (var a2 = 240; a2 >= 240 - upto; a2--) ctx[a2 === 240 ? 'moveTo' : 'lineTo'](outline[a2][0], outline[a2][1]);
+    ctx.stroke();
+    ctx.restore();
+
+    // буквы
+    ctx.font = '800 ' + fs + 'px ' + C.word;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    var tones = [C.heart, '#ff5d78', C.hot], tone = -1;
+    for (var c = 0; c < chars.length; c++) {
+      var ch = chars[c];
+      if (t < ch.delay) continue;
+      ch.vx += ((ch.tx - ch.x) * 42 - ch.vx * 9.5) * dt;
+      ch.vy += ((ch.ty - ch.y) * 42 - ch.vy * 9.5) * dt;
+      ch.x += ch.vx * dt; ch.y += ch.vy * dt;
+      if (ch.tone !== tone) { tone = ch.tone; ctx.fillStyle = tones[tone]; }
+      var shimmer = 0.7 + 0.3 * Math.sin(t * 2.4 - ch.d * 0.035);
+      ctx.globalAlpha = Math.min(1, (t - ch.delay) / 0.5) * shimmer;
+      ctx.fillText(ch.ch, cx + (ch.x - cx) * k, cy + (ch.y - cy) * k);
+    }
+
+    // слова вокруг
+    if (!calm && t > nextFloat) { spawnFloater(); nextFloat = t + 1.3 + Math.random() * 1.2; }
+    ctx.fillStyle = C.heart; ctx.shadowColor = C.heart; ctx.shadowBlur = 12;
+    for (var f = floaters.length - 1; f >= 0; f--) {
+      var fl = floaters[f];
+      fl.life += dt;
+      if (fl.life > fl.dur) { floaters.splice(f, 1); continue; }
+      var u = fl.life / fl.dur;
+      ctx.globalAlpha = Math.sin(Math.PI * u) * 0.9;
+      ctx.save();
+      ctx.translate(fl.x, fl.y - u * 22); ctx.rotate(fl.rot);
+      ctx.font = '400 ' + fl.size.toFixed(1) + 'px ' + C.hand;
+      ctx.fillText(fl.text, 0, 0);
+      ctx.restore();
+    }
+    ctx.shadowBlur = 0;
+
+    // искры
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = '#ff4466';
+    for (var p = sparks.length - 1; p >= 0; p--) {
+      var sp = sparks[p];
+      sp.life += dt;
+      if (sp.life > sp.dur) { sparks.splice(p, 1); continue; }
+      sp.vx *= 0.97; sp.vy = sp.vy * 0.97 + 20 * dt;
+      sp.x += sp.vx * dt; sp.y += sp.vy * dt;
+      ctx.globalAlpha = 1 - sp.life / sp.dur;
+      ctx.beginPath(); ctx.arc(sp.x, sp.y, sp.r, 0, 6.283); ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+
+    if (t > 4.6) title.classList.add('on');
+    if (t > 8) hint.classList.add('on');
+    requestAnimationFrame(frame);
+  }
+
+  canvas.addEventListener('pointerdown', function (e) {
+    var r = canvas.getBoundingClientRect();
+    var x = e.clientX - r.left, y = e.clientY - r.top, reach = Math.max(120, 9 * s);
+    for (var i = 0; i < chars.length; i++) {
+      var ch = chars[i], dx = ch.x - x, dy = ch.y - y, d = Math.hypot(dx, dy) || 1;
+      if (d < reach) {
+        var push = (1 - d / reach) * 1100;
+        ch.vx += dx / d * push; ch.vy += dy / d * push;
+      }
+    }
+    burst(x, y, 36, 220);
+    hint.classList.remove('on');
+  });
+
+  var resizeTimer;
+  window.addEventListener('resize', function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () {
+      build();
+      if (t > 5) chars.forEach(function (ch) { ch.delay = 0; ch.x = ch.tx; ch.y = ch.ty; });
+    }, 150);
+  });
+
+  function start() {
+    if (running) return;
+    running = true;
+    build();
+    if (calm) { title.classList.add('on'); }
+    requestAnimationFrame(function (now) { last = now; frame(now); });
+  }
+
+  // ждём шрифты, но не дольше полутора секунд
+  var fontsReady = document.fonts && document.fonts.load
+    ? Promise.all([document.fonts.load('800 16px Manrope', 'ты'), document.fonts.load('400 16px "Marck Script"', 'Ты')])
+    : Promise.resolve();
+  fontsReady.then(start, start);
+  setTimeout(start, 1500);
+})();
+</script>
